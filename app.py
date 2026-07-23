@@ -5,7 +5,7 @@ from flask import Flask, render_template_string, request, jsonify
 app = Flask(__name__)
 
 # Load your pickled logistic regression model
-MODEL_PATH = "logistic_model.pkl"
+MODEL_PATH = "Logistic_model.pkl"
 try:
     with open(MODEL_PATH, "rb") as f:
         model = pickle.load(f)
