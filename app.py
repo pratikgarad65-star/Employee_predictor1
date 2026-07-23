@@ -1,213 +1,341 @@
-import os
-import joblib
-import pandas as pd
-from flask import Flask, request, jsonify, render_template_string
+import pickle
+import numpy as np
+from flask import Flask, render_template_string, request, jsonify
 
 app = Flask(__name__)
 
-# Load model from the project root directory
-MODEL_PATH = os.path.join(os.path.dirname(__file__), 'Logistic_model.pkl')
+# Load your pickled logistic regression model
+MODEL_PATH = "logistic_model.pkl"
+try:
+    with open(MODEL_PATH, "rb") as f:
+        model = pickle.load(f)
+except Exception as e:
+    model = None
+    print(f"Error loading model: {e}")
 
-model = None
-if os.path.exists(MODEL_PATH):
-    model = joblib.load(MODEL_PATH)
+# Encoding dictionary based on standard LabelEncoder ordering for Employee dataset
+LABEL_ENCODERS = {
+    "Education": {"Bachelors": 0, "Masters": 1, "PHD": 2},
+    "City": {"Bangalore": 0, "New Delhi": 1, "Pune": 2},
+    "Gender": {"Female": 0, "Male": 1},
+    "EverBenched": {"No": 0, "Yes": 1}
+}
 
-# Interactive, modern UI built with Tailwind CSS and JavaScript
+# Embedded HTML/CSS/JS for attractive single-file setup
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ML Prediction Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <title>Employee Churn Predictor</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #0b0f19;
+            --card-bg: #111827;
+            --input-bg: #1f2937;
+            --border-color: #374151;
+            --text-primary: #f9fafb;
+            --text-secondary: #9ca3af;
+            --accent-color: #6366f1;
+            --accent-hover: #4f46e5;
+            --danger-color: #ef4444;
+            --success-color: #10b981;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            background-color: var(--card-bg);
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5);
+            width: 100%;
+            max-width: 800px;
+            padding: 35px;
+            border: 1px solid var(--border-color);
+        }
+
+        h2 {
+            font-size: 24px;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 25px;
+            background: linear-gradient(135deg, #818cf8 0%, #c084fc 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+        }
+
+        @media (max-width: 640px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+
+        select, input {
+            background-color: var(--input-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            border-radius: 8px;
+            padding: 12px;
+            font-size: 14px;
+            outline: none;
+            transition: all 0.2s ease;
+        }
+
+        select:focus, input:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+        }
+
+        .btn-submit {
+            grid-column: span 2;
+            background-color: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s ease;
+            margin-top: 10px;
+        }
+
+        @media (max-width: 640px) {
+            .btn-submit { grid-column: span 1; }
+        }
+
+        .btn-submit:hover {
+            background-color: var(--accent-hover);
+        }
+
+        .result-box {
+            margin-top: 25px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: 600;
+            display: none;
+        }
+
+        .result-stay {
+            background-color: rgba(16, 185, 129, 0.15);
+            color: var(--success-color);
+            border: 1px solid var(--success-color);
+        }
+
+        .result-leave {
+            background-color: rgba(239, 68, 68, 0.15);
+            color: var(--danger-color);
+            border: 1px solid var(--danger-color);
+        }
+
+        .result-error {
+            background-color: rgba(239, 68, 68, 0.15);
+            color: var(--danger-color);
+            border: 1px solid var(--danger-color);
+        }
+    </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen flex items-center justify-center p-4 sm:p-6">
+<body>
 
-    <div class="max-w-3xl w-full bg-slate-900/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-slate-800 p-6 sm:p-10">
-        <div class="text-center mb-8">
-            <div class="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-indigo-600/20 text-indigo-400 mb-3 border border-indigo-500/30">
-                <i class="fa-solid fa-chart-line text-2xl"></i>
-            </div>
-            <h1 class="text-3xl font-extrabold tracking-tight text-white">Employee Retention Predictor</h1>
-            <p class="text-slate-400 text-sm mt-1">Enter candidate details below to generate real-time AI predictions.</p>
+<div class="container">
+    <h2>Employee Retention Predictor</h2>
+    
+    <form id="predictionForm" class="grid">
+        <div class="form-group">
+            <label for="Education">Education</label>
+            <select id="Education" name="Education" required>
+                <option value="Bachelors">Bachelors</option>
+                <option value="Masters" selected>Masters</option>
+                <option value="PHD">PHD</option>
+            </select>
         </div>
 
-        <form id="predictForm" class="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div>
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Education</label>
-                <select name="Education" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition">
-                    <option value="Bachelors">Bachelors</option>
-                    <option value="Masters">Masters</option>
-                    <option value="PHD">PHD</option>
-                </select>
-            </div>
-
-            <div>
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Joining Year</label>
-                <input type="number" name="JoiningYear" placeholder="e.g. 2021" min="2000" max="2030" required
-                    class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition">
-            </div>
-
-            <div>
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">City</label>
-                <select name="City" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition">
-                    <option value="Bangalore">Bangalore</option>
-                    <option value="Pune">Pune</option>
-                    <option value="New Delhi">New Delhi</option>
-                </select>
-            </div>
-
-            <div>
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Payment Tier</label>
-                <select name="PaymentTier" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition">
-                    <option value="1">Tier 1</option>
-                    <option value="2">Tier 2</option>
-                    <option value="3">Tier 3</option>
-                </select>
-            </div>
-
-            <div>
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Age</label>
-                <input type="number" name="Age" placeholder="e.g. 28" min="18" max="70" required
-                    class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition">
-            </div>
-
-            <div>
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Gender</label>
-                <select name="Gender" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition">
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                </select>
-            </div>
-
-            <div>
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Ever Benched</label>
-                <select name="EverBenched" required class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition">
-                    <option value="No">No</option>
-                    <option value="Yes">Yes</option>
-                </select>
-            </div>
-
-            <div>
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">Domain Experience (Years)</label>
-                <input type="number" name="ExperienceInCurrentDomain" placeholder="e.g. 3" min="0" max="40" required
-                    class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition">
-            </div>
-
-            <div class="md:col-span-2 mt-4">
-                <button type="submit" id="submitBtn"
-                    class="w-full bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white font-semibold py-3.5 rounded-xl transition duration-200 shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-bolt"></i>
-                    <span>Generate Prediction</span>
-                </button>
-            </div>
-        </form>
-
-        <!-- Dynamic Output Container -->
-        <div id="resultBox" class="hidden mt-6 p-6 rounded-2xl border bg-slate-950/60 transition-all duration-300">
-            <div class="text-center">
-                <h3 class="text-xs uppercase tracking-widest text-slate-400 font-bold mb-1">Prediction Result</h3>
-                <p id="resultText" class="text-3xl font-black mt-1"></p>
-                <p id="confidenceText" class="text-sm text-slate-400 mt-2 font-medium"></p>
-            </div>
+        <div class="form-group">
+            <label for="JoiningYear">Joining Year</label>
+            <input type="number" id="JoiningYear" name="JoiningYear" value="2021" min="2000" max="2026" required>
         </div>
-    </div>
 
-    <script>
-        document.getElementById('predictForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const btn = document.getElementById('submitBtn');
-            const resultBox = document.getElementById('resultBox');
-            const resultText = document.getElementById('resultText');
-            const confidenceText = document.getElementById('confidenceText');
-            
-            btn.innerHTML = `<i class="fa-solid fa-circle-notch fa-spin"></i> Processing...`;
-            btn.disabled = true;
+        <div class="form-group">
+            <label for="City">City</label>
+            <select id="City" name="City" required>
+                <option value="Bangalore">Bangalore</option>
+                <option value="New Delhi">New Delhi</option>
+                <option value="Pune" selected>Pune</option>
+            </select>
+        </div>
 
-            const formData = new FormData(e.target);
-            const data = Object.fromEntries(formData.entries());
+        <div class="form-group">
+            <label for="PaymentTier">Payment Tier</label>
+            <select id="PaymentTier" name="PaymentTier" required>
+                <option value="1">Tier 1</option>
+                <option value="2">Tier 2</option>
+                <option value="3" selected>Tier 3</option>
+            </select>
+        </div>
 
-            try {
-                const response = await fetch('/predict', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(data)
-                });
-                
-                const res = await response.json();
+        <div class="form-group">
+            <label for="Age">Age</label>
+            <input type="number" id="Age" name="Age" value="29" min="18" max="70" required>
+        </div>
 
-                if (res.status === 'success') {
-                    resultBox.classList.remove('hidden');
-                    
-                    if (res.prediction === "1") {
-                        resultBox.className = "mt-6 p-6 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 text-center";
-                        resultText.className = "text-3xl font-black text-emerald-400";
-                        resultText.innerText = "Positive Prediction (Class 1)";
-                    } else {
-                        resultBox.className = "mt-6 p-6 rounded-2xl border border-amber-500/30 bg-amber-950/20 text-center";
-                        resultText.className = "text-3xl font-black text-amber-400";
-                        resultText.innerText = "Negative Prediction (Class 0)";
-                    }
+        <div class="form-group">
+            <label for="Gender">Gender</label>
+            <select id="Gender" name="Gender" required>
+                <option value="Male" selected>Male</option>
+                <option value="Female">Female</option>
+            </select>
+        </div>
 
-                    confidenceText.innerText = res.confidence ? `Model Probability: ${res.confidence}%` : '';
-                } else {
-                    alert('Error: ' + res.message);
-                }
-            } catch (err) {
-                alert('Server request failed!');
-            } finally {
-                btn.innerHTML = `<i class="fa-solid fa-bolt"></i><span>Generate Prediction</span>`;
-                btn.disabled = false;
+        <div class="form-group">
+            <label for="EverBenched">Ever Benched</label>
+            <select id="EverBenched" name="EverBenched" required>
+                <option value="No">No</option>
+                <option value="Yes" selected>Yes</option>
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label for="ExperienceInCurrentDomain">Domain Experience (Years)</label>
+            <input type="number" id="ExperienceInCurrentDomain" name="ExperienceInCurrentDomain" value="5" min="0" max="20" required>
+        </div>
+
+        <button type="submit" class="btn-submit" id="submitBtn">Predict</button>
+    </form>
+
+    <div id="resultBox" class="result-box"></div>
+</div>
+
+<script>
+    document.getElementById('predictionForm').addEventListener('submit', async function (e) {
+        e.preventDefault();
+        
+        const btn = document.getElementById('submitBtn');
+        const resultBox = document.getElementById('resultBox');
+        
+        btn.innerText = "Processing...";
+        btn.disabled = true;
+        resultBox.style.display = "none";
+
+        const formData = new FormData(this);
+        const data = Object.fromEntries(formData.entries());
+
+        try {
+            const response = await fetch('/predict', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application.json' },
+                body: JSON.stringify(data)
+            });
+
+            const result = await response.json();
+
+            resultBox.style.display = "block";
+            if (response.ok) {
+                resultBox.className = "result-box " + (result.prediction === 1 ? "result-leave" : "result-stay");
+                resultBox.innerText = result.message;
+            } else {
+                resultBox.className = "result-box result-error";
+                resultBox.innerText = "Error: " + result.error;
             }
-        });
-    </script>
+        } catch (err) {
+            resultBox.style.display = "block";
+            resultBox.className = "result-box result-error";
+            resultBox.innerText = "Error submitting form. Check server logs.";
+        } finally {
+            btn.innerText = "Predict";
+            btn.disabled = false;
+        }
+    });
+</script>
+
 </body>
 </html>
 """
 
-@app.route('/', methods=['GET'])
+@app.route('/')
 def home():
     return render_template_string(HTML_TEMPLATE)
 
 @app.route('/predict', methods=['POST'])
 def predict():
+    if model is None:
+        return jsonify({'error': 'Model pickle file not found or corrupted.'}), 500
+
     try:
-        if model is None:
-            return jsonify({'status': 'error', 'message': 'Model file (Logistic_model.pkl) not found.'}), 500
+        data = request.get_json()
 
-        data = request.get_json() if request.is_json else request.form
+        # Extract features and encode categorical values to integers
+        education = LABEL_ENCODERS['Education'][data['Education']]
+        joining_year = int(data['JoiningYear'])
+        city = LABEL_ENCODERS['City'][data['City']]
+        payment_tier = int(data['PaymentTier'])
+        age = int(data['Age'])
+        gender = LABEL_ENCODERS['Gender'][data['Gender']]
+        ever_benched = LABEL_ENCODERS['EverBenched'][data['EverBenched']]
+        experience = int(data['ExperienceInCurrentDomain'])
 
-        # Extracted features matching model expectations
-        input_data = {
-            'Education': [data.get('Education')],
-            'JoiningYear': [int(data.get('JoiningYear'))],
-            'City': [data.get('City')],
-            'PaymentTier': [int(data.get('PaymentTier'))],
-            'Age': [int(data.get('Age'))],
-            'Gender': [data.get('Gender')],
-            'EverBenched': [data.get('EverBenched')],
-            'ExperienceInCurrentDomain': [int(data.get('ExperienceInCurrentDomain'))]
-        }
+        # Order must strictly match model's trained feature names:
+        # ['Education', 'JoiningYear', 'City', 'PaymentTier', 'Age', 'Gender', 'EverBenched', 'ExperienceInCurrentDomain']
+        features = np.array([[
+            education,
+            joining_year,
+            city,
+            payment_tier,
+            age,
+            gender,
+            ever_benched,
+            experience
+        ]], dtype=float)
 
-        df = pd.DataFrame(input_data)
-        prediction = model.predict(df)[0]
+        # Make prediction
+        prediction = int(model.predict(features)[0])
         
-        confidence = None
-        if hasattr(model, "predict_proba"):
-            proba = model.predict_proba(df)[0]
-            confidence = round(float(max(proba)) * 100, 2)
+        message = "Employee is likely to Leave" if prediction == 1 else "Employee is likely to Stay"
 
         return jsonify({
-            'status': 'success',
-            'prediction': str(prediction),
-            'confidence': confidence
+            'prediction': prediction,
+            'message': message
         })
 
+    except KeyError as k_err:
+        return jsonify({'error': f"Invalid or unmapped categorical value: {str(k_err)}"}), 400
     except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 400
+        return jsonify({'error': str(e)}), 400
 
-# Entry point for local execution & Vercel WSGI
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    app.run(debug=True)
